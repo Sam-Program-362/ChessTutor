@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Chess } from "chess.js";
+import { Chess, type Square } from "chess.js";
 import { Bot, ChevronRight, CircleHelp, Gauge, History, House, RotateCcw, Settings, ShieldCheck, Sparkles, Swords } from "lucide-react";
 import { askStockfish, loadStockfish, type StockfishEngine } from "@/lib/engine";
 
@@ -21,6 +21,8 @@ type MoveRecord = {
 };
 type CoachMessage = MoveRecord & { text: string };
 type BoardPiece = { square: string; type: string; owner: Mover };
+type GameOutcome = { kind: "win" | "loss" | "draw"; title: string; detail: string };
+type LegalTarget = { square: Square; capture: boolean };
 
 const depths = [8, 12, 16, 20];
 
@@ -63,7 +65,13 @@ export default function ChessTutorApp() {
   const [engineError, setEngineError] = useState<string | null>(null);
   const [coachEnabled, setCoachEnabled] = useState(false);
   const [pendingCoach, setPendingCoach] = useState(0);
-  const [gameResult, setGameResult] = useState<string | null>(null);
+  const [gameOutcome, setGameOutcome] = useState<GameOutcome | null>(null);
+  const [resultDismissed, setResultDismissed] = useState(false);
+  const [legalMovesEnabled, setLegalMovesEnabled] = useState(true);
+  const [selectedSquare, setSelectedSquare] = useState<Square | null>(null);
+  const [legalTargets, setLegalTargets] = useState<LegalTarget[]>([]);
+  const [captureSquare, setCaptureSquare] = useState<Square | null>(null);
+  const captureTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const startGame = useCallback(async () => {
     versionRef.current += 1;
@@ -75,7 +83,11 @@ export default function ChessTutorApp() {
     setMoves([]);
     setCoachMessages([]);
     setThinking(false);
-    setGameResult(null);
+    setGameOutcome(null);
+    setResultDismissed(false);
+    setSelectedSquare(null);
+    setLegalTargets([]);
+    setCaptureSquare(null);
     try {
       const response = await fetch("/api/games", { method: "POST" });
       if (!response.ok) throw new Error("Unable to create game");
@@ -91,6 +103,8 @@ export default function ChessTutorApp() {
   useEffect(() => {
     mountedRef.current = true;
     void startGame();
+    const savedHighlights = window.localStorage.getItem("chessTutor.legalMoveHighlights");
+    setLegalMovesEnabled(savedHighlights !== "false");
     fetch("/api/settings")
       .then((response) => response.json())
       .then((data: { enabled?: boolean }) => {
@@ -100,6 +114,7 @@ export default function ChessTutorApp() {
     return () => {
       mountedRef.current = false;
       engineRef.current?.terminate?.();
+      if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
     };
   }, [startGame]);
 
@@ -168,6 +183,36 @@ export default function ChessTutorApp() {
     void persistMove(record, game);
   }, [persistMove]);
 
+  const flashCapture = useCallback((square: Square) => {
+    if (captureTimerRef.current) clearTimeout(captureTimerRef.current);
+    setCaptureSquare(square);
+    captureTimerRef.current = setTimeout(() => setCaptureSquare(null), 480);
+  }, []);
+
+  const showLegalMoves = useCallback((square: string) => {
+    if (!legalMovesEnabled || thinking || gameRef.current.turn() !== "w" || gameRef.current.isGameOver()) return;
+    const selected = square as Square;
+    const piece = gameRef.current.get(selected);
+    if (!piece || piece.color !== "w") {
+      setSelectedSquare(null);
+      setLegalTargets([]);
+      return;
+    }
+    const targets = gameRef.current.moves({ square: selected, verbose: true }).map((move) => ({
+      square: move.to,
+      capture: Boolean(move.captured),
+    }));
+    setSelectedSquare(selected);
+    setLegalTargets(targets);
+  }, [legalMovesEnabled, thinking]);
+
+  const finishGame = useCallback((outcome: GameOutcome) => {
+    setGameOutcome(outcome);
+    setResultDismissed(false);
+    setSelectedSquare(null);
+    setLegalTargets([]);
+  }, []);
+
   const playStockfish = useCallback(async (requestVersion: number) => {
     const engine = engineRef.current;
     if (!engine) {
@@ -182,7 +227,9 @@ export default function ChessTutorApp() {
       const to = uci.slice(2, 4);
       const promotion = uci.slice(4, 5) as "q" | "r" | "b" | "n" | undefined;
       const game = gameRef.current;
+      const wasCapture = Boolean(game.get(to as Square));
       const move = game.move({ from, to, ...(promotion ? { promotion } : {}) });
+      if (wasCapture || move.captured) flashCapture(to as Square);
       const record: MoveRecord = {
         moveNumber: historyRef.current.length + 1,
         san: move.san,
@@ -190,17 +237,22 @@ export default function ChessTutorApp() {
         mover: "Stockfish",
       };
       addRecord(record, game);
-      if (game.isGameOver()) setGameResult(game.isCheckmate() ? "Stockfish wins by checkmate" : "Drawn game");
+      if (game.isGameOver()) {
+        finishGame(game.isCheckmate()
+          ? { kind: "loss", title: "Checkmate", detail: "Stockfish wins this one. Review the game, then try a new line." }
+          : { kind: "draw", title: "Draw", detail: "A balanced finish. Neither side could force the win." });
+      }
     } catch {
       if (mountedRef.current) setEngineError("Stockfish could not complete that move. Try again.");
     } finally {
       if (mountedRef.current) setThinking(false);
     }
-  }, [addRecord, depth]);
+  }, [addRecord, depth, finishGame, flashCapture]);
 
   const onPieceDrop = useCallback((sourceSquare: string, targetSquare: string) => {
     if (thinking || !engineReady || gameRef.current.turn() !== "w" || gameRef.current.isGameOver()) return false;
     const game = gameRef.current;
+    const wasCapture = Boolean(game.get(targetSquare as Square));
     let move;
     try {
       move = game.move({ from: sourceSquare, to: targetSquare, promotion: "q" });
@@ -208,6 +260,9 @@ export default function ChessTutorApp() {
       return false;
     }
     if (!move) return false;
+    setSelectedSquare(null);
+    setLegalTargets([]);
+    if (wasCapture || move.captured) flashCapture(targetSquare as Square);
     const record: MoveRecord = {
       moveNumber: historyRef.current.length + 1,
       san: move.san,
@@ -216,14 +271,16 @@ export default function ChessTutorApp() {
     };
     addRecord(record, game);
     if (game.isGameOver()) {
-      setGameResult(game.isCheckmate() ? "You win by checkmate" : "Drawn game");
+      finishGame(game.isCheckmate()
+        ? { kind: "win", title: "Victory!", detail: "Checkmate. You found the winning finish." }
+        : { kind: "draw", title: "Draw", detail: "A balanced finish. Neither side could force the win." });
       return true;
     }
     setThinking(true);
     const requestVersion = versionRef.current;
     void playStockfish(requestVersion);
     return true;
-  }, [addRecord, engineReady, playStockfish, thinking]);
+  }, [addRecord, engineReady, finishGame, flashCapture, playStockfish, thinking]);
 
   const movePairs = useMemo(() => {
     const pairs: Array<{ number: number; white?: string; black?: string; latest?: boolean }> = [];
@@ -241,12 +298,36 @@ export default function ChessTutorApp() {
     return pairs;
   }, [moves]);
 
+  const squareStyles = useMemo(() => {
+    const styles: Record<string, React.CSSProperties> = {};
+    if (legalMovesEnabled && selectedSquare) {
+      styles[selectedSquare] = { boxShadow: "inset 0 0 0 4px rgba(117, 231, 183, .88)", backgroundColor: "rgba(117, 231, 183, .22)" };
+      legalTargets.forEach((target) => {
+        styles[target.square] = target.capture
+          ? { background: "radial-gradient(circle, transparent 57%, rgba(117, 231, 183, .9) 59%, rgba(117, 231, 183, .9) 69%, transparent 71%)" }
+          : { background: "radial-gradient(circle, rgba(20, 38, 45, .55) 0 16%, rgba(117, 231, 183, .82) 17% 24%, transparent 26%)" };
+      });
+    }
+    if (captureSquare) {
+      styles[captureSquare] = { ...styles[captureSquare], animation: "capture-flash 480ms ease-out", boxShadow: "inset 0 0 0 6px rgba(255, 190, 92, .95)" };
+    }
+    return styles;
+  }, [captureSquare, legalMovesEnabled, legalTargets, selectedSquare]);
+
+  const onSquareClick = useCallback((square: string) => {
+    if (selectedSquare && legalTargets.some((target) => target.square === square)) {
+      onPieceDrop(selectedSquare, square);
+      return;
+    }
+    showLegalMoves(square);
+  }, [legalTargets, onPieceDrop, selectedSquare, showLegalMoves]);
+
   const status = formatStatus(gameRef.current, thinking, engineReady, engineError);
   const latestComment = coachMessages[coachMessages.length - 1];
-  const resultText = gameResult || (gameRef.current.isCheck() && !thinking ? "Check — find your response" : null);
+  const resultText = gameOutcome?.title || (gameRef.current.isCheck() && !thinking ? "Check — find your response" : null);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${gameOutcome?.kind === "loss" ? "game-lost" : ""}`}>
       <aside className="sidebar">
         <Link href="/" className="brand">
           <span className="brand-mark">♞</span>
@@ -296,11 +377,15 @@ export default function ChessTutorApp() {
                   <Chessboard
                     position={position}
                     onPieceDrop={onPieceDrop}
+                    onPieceDragBegin={(_, square) => showLegalMoves(square)}
+                    onSquareClick={onSquareClick}
                     boardOrientation="white"
-                    arePiecesDraggable={!thinking && engineReady && !gameResult}
-                    customDarkSquareStyle={{ backgroundColor: "#6e927b" }}
-                    customLightSquareStyle={{ backgroundColor: "#e8eee2" }}
-                    customBoardStyle={{ borderRadius: "2px" }}
+                    arePiecesDraggable={!thinking && engineReady && !gameOutcome}
+                    animationDuration={230}
+                    customSquareStyles={squareStyles}
+                    customDarkSquareStyle={{ backgroundColor: "#496675" }}
+                    customLightSquareStyle={{ backgroundColor: "#c5cdd1" }}
+                    customBoardStyle={{ borderRadius: "3px" }}
                   />
                 </div>
                 <div className="player-row">
@@ -336,6 +421,20 @@ export default function ChessTutorApp() {
           </div>
         </div>
       </main>
+
+      {gameOutcome && !resultDismissed && <div className={`game-result-overlay result-${gameOutcome.kind}`} role="dialog" aria-modal="true" aria-labelledby="game-result-title">
+        {gameOutcome.kind === "win" && <div className="confetti" aria-hidden="true">{Array.from({ length: 28 }, (_, index) => <i key={index} />)}</div>}
+        <div className="game-result-modal">
+          <span className="result-icon" aria-hidden="true">{gameOutcome.kind === "win" ? "♛" : gameOutcome.kind === "loss" ? "♟" : "½"}</span>
+          <span className="result-kicker">Game complete</span>
+          <h2 id="game-result-title">{gameOutcome.title}</h2>
+          <p>{gameOutcome.detail}</p>
+          <div className="result-actions">
+            <button className="button button-quiet" onClick={() => setResultDismissed(true)}>Review board</button>
+            <button className="button button-primary" onClick={() => void startGame()}><RotateCcw />Play again</button>
+          </div>
+        </div>
+      </div>}
     </div>
   );
 }
