@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useEffect, useState } from "react";
+import { CSSProperties, FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Check, KeyRound, LockKeyhole, Save, Settings, Sparkles } from "lucide-react";
 import type { SkillLevel } from "@/lib/coach";
 
@@ -10,6 +10,10 @@ const skillOptions: Array<{ value: SkillLevel; description: string }> = [
   { value: "Intermediate", description: "Plans, patterns, and practical tactics." },
   { value: "Pro", description: "Casual, concise, lightly strategic." },
 ];
+
+// Rendered as a plain text input so password managers do not treat the settings
+// form as a login form; the characters are still masked visually.
+const maskedInputStyle = { WebkitTextSecurity: "disc" } as CSSProperties;
 
 type SettingsResponse = {
   enabled: boolean;
@@ -104,7 +108,7 @@ export default function SettingsPanel() {
         <header className="topbar"><div className="breadcrumb"><Link href="/">Workspace</Link><span>›</span><strong>Settings</strong></div><div className="topbar-right"><span className="kicker"><span className="kicker-dot" /> Coach configuration</span><Link className="icon-btn" href="/" aria-label="Back to practice"><ArrowLeft /></Link></div></header>
         <div className="content-wrap settings-layout">
           <div className="page-intro" style={{ marginTop: 0 }}><div><div className="eyebrow">Workspace / Private configuration</div><h1 className="page-title">Make the coach yours.</h1><p className="page-description">Connect an OpenAI-compatible model for thoughtful, move-by-move feedback while keeping your provider key off the client.</p></div></div>
-          <form className="settings-card" onSubmit={onSubmit}>
+          <form className="settings-card" onSubmit={onSubmit} autoComplete="off">
             <div className="settings-top"><div className="settings-title-row"><div><h1>Preferences</h1><p>Tune board assistance and configure private, move-by-move coaching.</p></div>{enabled && <span className="save-status"><span className="status-dot" />Coach active</span>}</div></div>
             <section className="settings-section">
               <div className="section-heading"><span className="section-number">01</span><div><h2>Board assistance</h2><p>Control the visual cues shown while you calculate.</p></div></div>
@@ -117,9 +121,9 @@ export default function SettingsPanel() {
             {enabled ? <section className="settings-section">
               <div className="section-heading"><span className="section-number">03</span><div><h2>Provider connection</h2><p>Use a provider endpoint that accepts the Chat Completions format.</p></div></div>
               <div className="form-grid">
-                <div className="form-field full"><label htmlFor="apiBaseUrl">API base URL</label><input id="apiBaseUrl" value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={loading} /><p className="form-help">We append /chat/completions automatically when needed.</p></div>
-                <div className="form-field"><label htmlFor="modelName">Model name</label><input id="modelName" value={modelName} onChange={(event) => setModelName(event.target.value)} placeholder="gpt-4o-mini" disabled={loading} /></div>
-                <div className="form-field"><label htmlFor="apiKey">API key {hasApiKey && "· saved"}</label><input id="apiKey" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={hasApiKey ? "Leave blank to keep current key" : "sk-…"} autoComplete="new-password" disabled={loading} /><p className="form-help"><KeyRound size={11} style={{ verticalAlign: "-2px", marginRight: 4 }} />Encrypted at rest with AES-256-GCM.</p></div>
+                <div className="form-field full"><label htmlFor="apiBaseUrl">API base URL</label><input id="apiBaseUrl" name="chesstutor-api-base-url" autoComplete="off" value={apiBaseUrl} onChange={(event) => setApiBaseUrl(event.target.value)} placeholder="https://api.openai.com/v1" disabled={loading} /><p className="form-help">We append /chat/completions automatically when needed.</p></div>
+                <div className="form-field"><label htmlFor="modelName">Model name</label><input id="modelName" name="chesstutor-model-name" autoComplete="off" value={modelName} onChange={(event) => setModelName(event.target.value)} placeholder="gpt-4o-mini" disabled={loading} /></div>
+                <div className="form-field"><label htmlFor="apiKey">API key {hasApiKey && "· saved"}</label><input id="apiKey" name="chesstutor-api-key" type="text" style={maskedInputStyle} value={apiKey} onChange={(event) => setApiKey(event.target.value)} placeholder={hasApiKey ? "Leave blank to keep current key" : "sk-…"} autoComplete="off" disabled={loading} /><p className="form-help"><KeyRound size={11} style={{ verticalAlign: "-2px", marginRight: 4 }} />Encrypted at rest with AES-256-GCM.</p></div>
               </div>
             </section> : <section className="settings-section"><div className="section-heading"><span className="section-number">03</span><div><h2>Provider connection</h2><p>Turn on AI Coach above to securely connect a model and reveal its connection fields.</p></div></div></section>}
             <section className="settings-section">

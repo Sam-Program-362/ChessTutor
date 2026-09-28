@@ -61,10 +61,6 @@ export async function PUT(request: Request) {
     return NextResponse.json(publicSettings(saved));
   } catch (error) {
     console.error("Unable to save ChessTutor settings", error);
-    // TODO(debug): TEMPORARY — surfaces the raw error message to the client.
-    // Revert to the generic "Settings could not be saved." message before this
-    // stays in production; this route is unauthenticated.
-    const detail = error instanceof Error ? error.message : String(error);
-    return NextResponse.json({ error: `Settings could not be saved: ${detail}` }, { status: 500 });
+    return NextResponse.json({ error: "Settings could not be saved." }, { status: 500 });
   }
 }
