@@ -3,7 +3,9 @@ import { neon } from "@neondatabase/serverless";
 export type DbRow = Record<string, unknown>;
 
 const databaseUrl = process.env.DATABASE_URL;
-const sql = databaseUrl ? neon(databaseUrl) : null;
+const sql = databaseUrl
+  ? neon(databaseUrl, { fetchOptions: { cache: "no-store" } })
+  : null;
 
 export function isDatabaseConfigured() {
   return Boolean(sql);

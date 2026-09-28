@@ -105,7 +105,7 @@ export default function ChessTutorApp() {
     void startGame();
     const savedHighlights = window.localStorage.getItem("chessTutor.legalMoveHighlights");
     setLegalMovesEnabled(savedHighlights !== "false");
-    fetch("/api/settings")
+    fetch("/api/settings", { cache: "no-store" })
       .then((response) => response.json())
       .then((data: { enabled?: boolean }) => {
         if (mountedRef.current) setCoachEnabled(Boolean(data.enabled));
