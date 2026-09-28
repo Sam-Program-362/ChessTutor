@@ -5,6 +5,8 @@ import { getSettings, saveSettings } from "@/lib/settings-store";
 import type { SkillLevel } from "@/lib/coach";
 
 export const dynamic = "force-dynamic";
+export const revalidate = 0;
+export const fetchCache = "force-no-store";
 
 const skills: SkillLevel[] = ["Beginner", "Intermediate", "Pro"];
 
@@ -21,7 +23,9 @@ function publicSettings(settings: Awaited<ReturnType<typeof getSettings>>) {
 export async function GET() {
   const userId = await getCurrentUserId();
   const settings = await getSettings(userId);
-  return NextResponse.json(publicSettings(settings));
+  return NextResponse.json(publicSettings(settings), {
+    headers: { "Cache-Control": "no-store" },
+  });
 }
 
 export async function PUT(request: Request) {
@@ -58,7 +62,9 @@ export async function PUT(request: Request) {
       modelName: String(body.modelName ?? "").trim(),
       skillLevel,
     });
-    return NextResponse.json(publicSettings(saved));
+    return NextResponse.json(publicSettings(saved), {
+      headers: { "Cache-Control": "no-store" },
+    });
   } catch (error) {
     console.error("Unable to save ChessTutor settings", error);
     return NextResponse.json({ error: "Settings could not be saved." }, { status: 500 });

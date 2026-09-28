@@ -38,7 +38,7 @@ export default function SettingsPanel() {
 
   useEffect(() => {
     setLegalMovesEnabled(window.localStorage.getItem("chessTutor.legalMoveHighlights") !== "false");
-    fetch("/api/settings")
+    fetch("/api/settings", { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Settings could not be loaded.");
         return response.json() as Promise<SettingsResponse>;
